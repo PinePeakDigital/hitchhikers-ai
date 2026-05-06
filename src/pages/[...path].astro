@@ -9,12 +9,11 @@ const formattedPath = path?.replace(/[/-]/g, " ").trim() || "404";
 let recommendations: { path: string; title: string }[] = [];
 try {
   const articles = Astro.locals.runtime?.env?.ARTICLES;
-  const indices = Astro.locals.runtime?.env?.INDICES;
-  if (articles && indices) {
+  const db = Astro.locals.runtime?.env?.DB;
+  if (articles && db) {
     const keys = await getRandomKeys({
-      kv: articles,
       indexKey: "articles",
-      indices,
+      db,
       count: 3,
       excludedKeys: [path || ""],
     });

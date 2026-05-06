@@ -6,7 +6,7 @@ export const prerender = false;
 /**
  * HTTP GET handler that generates article content from storage and returns it as JSON.
  *
- * Reads ARTICLES and INDICES from `locals.runtime.env`, validates their presence, normalizes
+ * Reads ARTICLES (KV) and DB (D1) from `locals.runtime.env`, validates their presence, normalizes
  * the incoming `params.path` (joins arrays with `/`, falls back to `"404"` when empty),
  * and calls `getArticle` with the OpenAI API key and token usage flags. On success returns
  * a JSON response `{ content }`. On error returns a 500 JSON response with an `error`
@@ -18,9 +18,9 @@ export const prerender = false;
 export async function GET({ params, locals }: APIContext) {
   try {
     const articles = locals.runtime?.env?.ARTICLES;
-    const indices = locals.runtime?.env?.INDICES;
+    const db = locals.runtime?.env?.DB;
 
-    if (!articles || !indices) {
+    if (!articles || !db) {
       throw new Error("Article or index storage not available");
     }
 
@@ -38,7 +38,7 @@ export async function GET({ params, locals }: APIContext) {
       locals.runtime.env.TOKEN_USAGE,
       articles,
       articlePath || "404",
-      indices
+      db
     );
 
     if (!content) {

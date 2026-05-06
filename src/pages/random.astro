@@ -4,12 +4,11 @@ import { getRandomKeys } from "../lib/getRandomKeys";
 export const prerender = false;
 
 try {
-  const articles = Astro.locals.runtime?.env?.ARTICLES;
-  if (articles) {
+  const db = Astro.locals.runtime?.env?.DB;
+  if (db) {
     const randomKey = await getRandomKeys({
-      kv: articles,
       indexKey: "articles",
-      indices: Astro.locals.runtime?.env?.INDICES,
+      db,
       count: 1,
     }).then((keys) => keys[0]);
 

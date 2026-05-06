@@ -2,6 +2,7 @@ import { updateIndex } from "./indices";
 import { LIMIT_EXCEEDED_MESSAGE, RateLimitedOpenAI } from "./openai";
 import { marked } from "marked";
 
+
 async function getArticleText(
   openai: RateLimitedOpenAI,
   formattedPath: string
@@ -97,7 +98,7 @@ async function getArticleImage(
  * - Normalizes `urlPath` into a human-friendly `formattedPath`.
  * - Returns a cached HTML article if present.
  * - If not cached, enforces usage limits and returns a limit message when exceeded.
- * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
+ * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the D1 article index via `db`, and returns the article HTML.
  *
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
  * @returns The article as HTML (marked output).
@@ -108,7 +109,7 @@ export async function getArticle(
   tokenUsage: any,
   articles: KVNamespace,
   urlPath: string,
-  indices: KVNamespace
+  db: D1Database
 ) {
   const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
   const isSafe = await openai.isSafe(urlPath);
@@ -144,8 +145,9 @@ export async function getArticle(
       );
     }
 
-    await articles.put(urlPath || "404", guideEntry);
-    await updateIndex(articles, "articles", indices);
+    const articleKey = urlPath || "404";
+    await articles.put(articleKey, guideEntry);
+    await updateIndex(db, articleKey);
 
     return marked(guideEntry);
   } catch (error) {

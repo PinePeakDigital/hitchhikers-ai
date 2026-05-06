@@ -26,5 +26,13 @@
 			"binding": "INDICES",
 			"id": "4c98f53cf22241e6964f1f2e3231811b"
 		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "hitchhikers-articles",
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"migrations_dir": "migrations"
+		}
 	]
 }

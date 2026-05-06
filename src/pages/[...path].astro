@@ -16,12 +16,11 @@ if (!pathIsValid) {
 let recommendations: { path: string; title: string }[] = [];
 try {
   const articles = env.ARTICLES;
-  const indices = env.INDICES;
-  if (articles && indices) {
+  const db = env.DB;
+  if (articles && db) {
     const keys = await getRandomKeys({
-      kv: articles,
       indexKey: "articles",
-      indices,
+      db,
       count: 3,
       excludedKeys: [path || ""],
     });

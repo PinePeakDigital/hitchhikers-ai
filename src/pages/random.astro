@@ -8,9 +8,8 @@ try {
   const articles = env.ARTICLES;
   if (articles) {
     const randomKey = await getRandomKeys({
-      kv: articles,
       indexKey: "articles",
-      indices: env.INDICES,
+      db: env.DB,
       count: 1,
     }).then((keys) => keys[0]);
 

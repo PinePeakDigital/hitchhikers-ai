@@ -164,7 +164,7 @@ export async function POST({ params }: APIContext) {
       env.TOKEN_USAGE,
       env.ARTICLES,
       articlePath,
-      env.INDICES,
+      env.DB,
       env.AI_GATEWAY_ID
     );
 

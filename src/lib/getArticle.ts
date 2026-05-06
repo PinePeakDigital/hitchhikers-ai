@@ -1,4 +1,4 @@
-import { appendToIndex } from "./indices";
+import { updateIndex } from "./indices";
 import { LIMIT_EXCEEDED_MESSAGE, RateLimitedAI } from "./ai";
 import { marked } from "marked";
 
@@ -132,7 +132,7 @@ export async function getCachedArticle(articles: KVNamespace, urlPath: string) {
 }
 
 /**
- * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the indices, and return the article rendered as HTML.
+ * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the D1 index, and return the article rendered as HTML.
  *
  * This function:
  * - Normalizes `urlPath` into a human-friendly `formattedPath`.
@@ -140,7 +140,7 @@ export async function getCachedArticle(articles: KVNamespace, urlPath: string) {
  * - If not cached, enforces usage limits and returns a limit message when exceeded.
  * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
  *   If the moderation check itself fails, returns the limit message rather than generating.
- * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
+ * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the D1 article index via `db`, and returns the article HTML.
  *
  * @param ai - The Workers AI binding.
  * @param gatewayId - Optional AI Gateway id; when set, inference is routed through it.
@@ -156,7 +156,7 @@ export async function getArticle(
   tokenUsage: KVNamespace,
   articles: KVNamespace,
   urlPath: string,
-  indices: KVNamespace,
+  db: D1Database,
   gatewayId?: string
 ) {
   const formattedPath = urlPath?.replace(/[/-]/g, " ").trim() || "404";
@@ -219,7 +219,7 @@ export async function getArticle(
     const key = urlPath || "404";
     const uploaded = Date.now();
     await articles.put(key, guideEntry, { metadata: { uploaded } });
-    await appendToIndex(indices, "articles", { name: key, metadata: { uploaded } });
+    await updateIndex(db, key, uploaded);
 
     return marked(guideEntry);
   } catch (error) {

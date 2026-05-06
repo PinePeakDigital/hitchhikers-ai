@@ -1,41 +1,65 @@
-import { getIndex } from "./indices";
-
 interface Options {
   indexKey: "articles";
-  indices: KVNamespace | undefined;
-  kv: KVNamespace | undefined;
+  db: D1Database | undefined;
   excludedKeys?: string[];
   count?: number;
 }
 
+type ArticleRow = {
+  name: string;
+  uploaded: number;
+};
+
 /**
- * Retrieve a randomized subset of keys from an index.
+ * Retrieve a randomized subset of keys from the D1-backed article index.
  *
- * Fetches the index for `indexKey` (via the provided `kv` and `indices`), optionally filters out keys
- * whose names appear in `excludedKeys`, shuffles the remaining entries, and returns up to `count`
- * keys.
+ * Issues a `SELECT name, uploaded FROM articles [WHERE name NOT IN (?, ?, ...)]
+ * ORDER BY RANDOM() LIMIT ?` query and returns the rows in the
+ * `KVNamespaceListKey<T>[]` shape callers expect. Returns an empty array if
+ * the D1 binding is missing or the query fails.
  *
- * If `kv` or `indices` is not provided the function returns an empty array.
- *
- * @param indexKey - The index identifier (e.g., `"articles"`) to load.
- * @param excludedKeys - Optional list of key names to exclude from selection.
+ * @param indexKey - Index identifier; only `"articles"` is currently supported.
+ * @param excludedKeys - Optional list of names to exclude from selection.
  * @param count - Maximum number of keys to return (default: 1).
- * @returns A promise that resolves to an array of up to `count` randomly chosen keys from the index.
  */
 export async function getRandomKeys<T>({
   indexKey,
-  indices,
-  kv,
+  db,
   excludedKeys,
   count = 1,
 }: Options): Promise<KVNamespaceListKey<T>[]> {
-  if (!kv || !indices) return [];
+  if (!db) return [];
+  if (indexKey !== "articles") return [];
 
-  const index = await getIndex<T>(kv, indexKey, indices);
+  const filtered = (excludedKeys ?? []).filter(
+    (k): k is string => typeof k === "string" && k.length > 0
+  );
 
-  const filteredKeys = excludedKeys
-    ? index.filter((key) => !excludedKeys.includes(key.name))
-    : index;
+  try {
+    let stmt: D1PreparedStatement;
+    if (filtered.length > 0) {
+      const placeholders = filtered.map(() => "?").join(", ");
+      stmt = db
+        .prepare(
+          `SELECT name, uploaded FROM articles WHERE name NOT IN (${placeholders}) ORDER BY RANDOM() LIMIT ?`
+        )
+        .bind(...filtered, count);
+    } else {
+      stmt = db
+        .prepare(
+          "SELECT name, uploaded FROM articles ORDER BY RANDOM() LIMIT ?"
+        )
+        .bind(count);
+    }
 
-  return filteredKeys.sort(() => 0.5 - Math.random()).slice(0, count);
+    const result = await stmt.all<ArticleRow>();
+
+    return (result.results ?? []).map((row) => ({
+      name: row.name,
+      metadata: { uploaded: row.uploaded } as unknown as T,
+    }));
+  } catch (error) {
+    console.error("D1 getRandomKeys failed:", error);
+    return [];
+  }
 }

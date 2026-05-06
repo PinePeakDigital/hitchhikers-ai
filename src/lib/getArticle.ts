@@ -1,4 +1,4 @@
-import { updateIndex } from "./indices";
+import { appendToIndex } from "./indices";
 import { LIMIT_EXCEEDED_MESSAGE, RateLimitedOpenAI } from "./openai";
 import { marked } from "marked";
 
@@ -144,8 +144,10 @@ export async function getArticle(
       );
     }
 
-    await articles.put(urlPath || "404", guideEntry);
-    await updateIndex(articles, "articles", indices);
+    const key = urlPath || "404";
+    const uploaded = Date.now();
+    await articles.put(key, guideEntry, { metadata: { uploaded } });
+    await appendToIndex(indices, "articles", { name: key, metadata: { uploaded } });
 
     return marked(guideEntry);
   } catch (error) {

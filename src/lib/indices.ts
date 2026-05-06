@@ -1,51 +1,88 @@
-const EXPIRATION_TTL = 86400; /**
- * Retrieve a cached list of KV keys for the given index, using the `indices` namespace when available.
+/**
+ * D1-backed article index helpers.
  *
- * If a cached entry exists in `indices` for `indexKey`, that list is returned. If no cache entry
- * exists and a `kv` namespace is provided, the index is refreshed by calling `updateIndex`, which
- * lists keys from `kv` and stores the result in `indices` with a TTL. If `indices` is not provided
- * or `kv` is missing when a refresh is required, an empty array is returned.
+ * The article index previously lived in the `INDICES` KV namespace and was
+ * rebuilt with `kv.list()` calls. KV `list` operations are the most
+ * rate-limited op class on Cloudflare's KV plan, so the index has been
+ * migrated to a Cloudflare D1 database (binding `DB`). The functions below
+ * preserve the original `getIndex` / `updateIndex` names and return the same
+ * `KVNamespaceListKey<T>[]` shape (`{ name, metadata: { uploaded } }`) so
+ * existing callers continue to work without changes.
  *
- * @param indexKey - The index to load; either `"articles"` or `"searches"`.
- * @returns The list of KV keys for the requested index (may be empty).
+ * Article BODIES still live in the `ARTICLES` KV namespace — only the
+ * lightweight name + uploaded-timestamp index has moved to D1.
  */
 
-export async function getIndex<T>(
-  kv: KVNamespace | undefined,
-  indexKey: "articles" | "searches",
-  indices: KVNamespace | undefined
-): Promise<KVNamespaceListKey<T>[]> {
-  if (!indices) return [];
+type ArticleRow = {
+  name: string;
+  uploaded: number;
+};
 
-  const index = await indices.get<KVNamespaceListKey<T>[]>(indexKey, "json");
-
-  if (index) return index;
-  if (!kv) return [];
-
-  return updateIndex(kv, indexKey, indices);
+/**
+ * Convert a D1 article row into the KV-list-key shape that callers expect.
+ */
+function rowToKey<T>(row: ArticleRow): KVNamespaceListKey<T> {
+  return {
+    name: row.name,
+    metadata: { uploaded: row.uploaded } as unknown as T,
+  };
 }
 
 /**
- * Refreshes and caches a list of keys from a KV namespace under a short-lived index.
+ * Fetch the full article index from D1, ordered most-recently-uploaded first.
  *
- * Retrieves all keys from `kv`, stores the JSON-serialized key list in `indices` at `indexKey`
- * with a 24-hour TTL, and returns the keys array. If either `kv` or `indices` is missing, returns an empty array.
+ * Returns an empty array if the D1 binding is unavailable or the query fails.
  *
- * @param indexKey - Which index to update ("articles" or "searches").
- * @returns The array of keys read from `kv`.
+ * @param db - The D1 database binding (typically `locals.runtime.env.DB`).
+ * @param indexKey - Index identifier; only `"articles"` is currently supported.
+ *                   Other values return an empty array.
+ * @returns The index entries in the same shape KV `list()` produced.
  */
-export async function updateIndex<T>(
-  kv: KVNamespace | undefined,
-  indexKey: "articles" | "searches",
-  indices: KVNamespace | undefined
+export async function getIndex<T>(
+  db: D1Database | undefined,
+  indexKey: "articles" | "searches"
 ): Promise<KVNamespaceListKey<T>[]> {
-  if (!kv || !indices) return [];
+  if (!db) return [];
+  if (indexKey !== "articles") return [];
 
-  const { keys } = await kv.list<T>();
+  try {
+    const result = await db
+      .prepare("SELECT name, uploaded FROM articles ORDER BY uploaded DESC")
+      .all<ArticleRow>();
 
-  await indices.put(indexKey, JSON.stringify(keys), {
-    expirationTtl: EXPIRATION_TTL,
-  });
+    return (result.results ?? []).map((row) => rowToKey<T>(row));
+  } catch (error) {
+    console.error("D1 getIndex failed:", error);
+    return [];
+  }
+}
 
-  return keys;
+/**
+ * Insert (or update) an article entry in the D1 `articles` table.
+ *
+ * Used when a new article is generated; replaces the old `updateIndex`
+ * KV-list-and-cache flow with a single indexed SQL UPSERT.
+ *
+ * @param db - The D1 database binding.
+ * @param name - The article key/path being recorded.
+ * @param uploaded - Unix-epoch milliseconds for the upload time. Defaults to `Date.now()`.
+ */
+export async function updateIndex(
+  db: D1Database | undefined,
+  name: string,
+  uploaded: number = Date.now()
+): Promise<void> {
+  if (!db) return;
+
+  try {
+    await db
+      .prepare(
+        "INSERT INTO articles (name, uploaded) VALUES (?, ?) " +
+          "ON CONFLICT(name) DO UPDATE SET uploaded = excluded.uploaded"
+      )
+      .bind(name, uploaded)
+      .run();
+  } catch (error) {
+    console.error("D1 updateIndex failed:", error);
+  }
 }

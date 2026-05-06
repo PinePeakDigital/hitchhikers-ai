@@ -6,11 +6,13 @@ let latestEntry = null;
 
 try {
   const articles = Astro.locals.runtime?.env?.ARTICLES;
-  const indices = Astro.locals.runtime?.env?.INDICES;
-  if (articles && indices) {
-    const keys = await articles.list();
-    articleCount = keys.keys.length;
-    latestEntry = await getLatestArticle(articles, indices);
+  const db = Astro.locals.runtime?.env?.DB;
+  if (articles && db) {
+    const countRow = await db
+      .prepare("SELECT COUNT(*) AS c FROM articles")
+      .first<{ c: number }>();
+    articleCount = countRow?.c ?? 0;
+    latestEntry = await getLatestArticle(articles, db);
   }
 } catch (error) {
   console.error("Error fetching article data:", error);

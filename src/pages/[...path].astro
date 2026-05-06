@@ -1,9 +1,15 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { getRandomKeys } from "../lib/getRandomKeys";
+import { isValidArticlePath } from "./api/article/[...path]";
 
 const { path } = Astro.params;
 const formattedPath = path?.replace(/[/-]/g, " ").trim() || "404";
+const pathIsValid = !!path && isValidArticlePath(path);
+
+if (!pathIsValid) {
+  Astro.response.status = 404;
+}
 
 // Get 3 random articles for recommendations
 let recommendations: { path: string; title: string }[] = [];
@@ -99,20 +105,26 @@ try {
       const response = await fetch(`/api/article${path}`);
       console.log("Response status:", response.status);
 
+      const data = (await response.json().catch(() => null)) as {
+        content?: string;
+        error?: string;
+      } | null;
+      console.log("Received data:", data);
+
+      if (response.status === 404 && data?.content) {
+        content.innerHTML = data.content;
+        content.classList.remove("hidden");
+        loading.classList.add("hidden");
+        return;
+      }
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Error response:", errorText);
+        console.error("Error response:", data);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = (await response.json()) as {
-        content?: string;
-        error?: string;
-      };
-      console.log("Received data:", data);
-
-      if (data.error) throw new Error(data.error);
-      if (!data.content) throw new Error("No content received");
+      if (data?.error) throw new Error(data.error);
+      if (!data?.content) throw new Error("No content received");
 
       content.innerHTML = data.content;
       content.classList.remove("hidden");

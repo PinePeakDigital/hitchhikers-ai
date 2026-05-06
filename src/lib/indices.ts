@@ -1,4 +1,5 @@
-const EXPIRATION_TTL = 86400; /**
+const EXPIRATION_TTL = 2592000; // 30 days; index is kept fresh by incremental updates (#9)
+/**
  * Retrieve a cached list of KV keys for the given index, using the `indices` namespace when available.
  *
  * If a cached entry exists in `indices` for `indexKey`, that list is returned. If no cache entry

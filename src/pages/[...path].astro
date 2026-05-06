@@ -1,9 +1,15 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { getRandomKeys } from "../lib/getRandomKeys";
+import { isValidArticlePath } from "./api/article/[...path]";
 
 const { path } = Astro.params;
 const formattedPath = path?.replace(/[/-]/g, " ").trim() || "404";
+const pathIsValid = !!path && isValidArticlePath(path);
+
+if (!pathIsValid) {
+  Astro.response.status = 404;
+}
 
 // Get 3 random articles for recommendations
 let recommendations: { path: string; title: string }[] = [];

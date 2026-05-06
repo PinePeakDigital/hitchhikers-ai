@@ -3,6 +3,23 @@ import type { APIContext } from "astro";
 
 export const prerender = false;
 
+const DENYLISTED_PATHS = new Set([
+  "wp-admin",
+  "wp-login",
+  "wp-content",
+  "wp-includes",
+  "wp-config",
+  "phpmyadmin",
+  "admin",
+  "administrator",
+  "xmlrpc",
+  "robots-txt",
+  "sitemap-xml",
+  "env",
+  "git",
+  "well-known",
+]);
+
 /**
  * Validates that a path looks like a legitimate article slug.
  *
@@ -10,12 +27,14 @@ export const prerender = false;
  *  - Must match kebab-case with 1–10 dash-separated segments of lowercase
  *    letters and digits: `/^[a-z0-9]+(-[a-z0-9]+){0,9}$/`.
  *  - Total length must be ≤ 80 characters.
+ *  - Must not match a known scanner/probe slug (e.g. `wp-admin`, `phpmyadmin`).
  *
  * Used to reject random/garbage paths from bots and crawlers before they
  * trigger article generation, KV writes, and index updates.
  */
 export function isValidArticlePath(path: string): boolean {
   if (!path || path.length > 80) return false;
+  if (DENYLISTED_PATHS.has(path)) return false;
   return /^[a-z0-9]+(-[a-z0-9]+){0,9}$/.test(path);
 }
 

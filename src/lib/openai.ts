@@ -16,6 +16,7 @@ export class RateLimitedOpenAI {
   private readonly MAX_TOKENS_PER_DAY = 100000;
   private readonly MAX_IMAGES_PER_DAY = 10;
   private readonly KV_TTL_SECONDS = 86400; // 24 hours
+  private cachedUsage: { date: string; data: DailyUsage } | null = null;
 
   constructor(apiKey: string, tokenUsage: KVNamespace) {
     this.openai = new OpenAI({ apiKey });
@@ -23,14 +24,17 @@ export class RateLimitedOpenAI {
   }
 
   private async getUsage(dateKey: string): Promise<DailyUsage> {
+    if (this.cachedUsage?.date === dateKey) {
+      return this.cachedUsage.data;
+    }
     const usage = await this.tokenUsage.get<DailyUsage>(dateKey, "json");
-    return (
-      usage || {
-        totalTokens: 0,
-        imageGenerations: 0,
-        lastUpdated: new Date().toISOString(),
-      }
-    );
+    const data: DailyUsage = usage || {
+      totalTokens: 0,
+      imageGenerations: 0,
+      lastUpdated: new Date().toISOString(),
+    };
+    this.cachedUsage = { date: dateKey, data };
+    return data;
   }
 
   private async updateUsage(
@@ -48,6 +52,7 @@ export class RateLimitedOpenAI {
     await this.tokenUsage.put(dateKey, JSON.stringify(updated), {
       expirationTtl: this.KV_TTL_SECONDS,
     });
+    this.cachedUsage = { date: dateKey, data: updated };
   }
 
   private getLimitExceededResponse() {

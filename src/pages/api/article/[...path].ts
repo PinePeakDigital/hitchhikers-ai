@@ -47,10 +47,22 @@ export function isValidArticlePath(path: string): boolean {
  * a JSON response `{ content }`. On error returns a 500 JSON response with an `error`
  * message and a user-facing `content` notice.
  *
+ * Successful (200) responses are cached at the Cloudflare edge using the Workers Cache API
+ * keyed on the request URL, so repeat views skip the ARTICLES KV read entirely.
+ *
  * @param params.path - Route path captured by Astro; may be a string or string[] (arrays are joined with `/`)
  * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
  */
-export async function GET({ params, locals }: APIContext) {
+export async function GET({ params, locals, request }: APIContext) {
+  // `caches.default` is a Cloudflare Workers-specific API not present in the
+  // standard `CacheStorage` lib type, so we narrow to the workerd type here.
+  const cache = (caches as unknown as { default: Cache }).default;
+  const cacheKey = new Request(request.url, { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   try {
     const articles = locals.runtime?.env?.ARTICLES;
     const indices = locals.runtime?.env?.INDICES;
@@ -98,11 +110,17 @@ export async function GET({ params, locals }: APIContext) {
       throw new Error("No content generated");
     }
 
-    return new Response(JSON.stringify({ content }), {
+    const response = new Response(JSON.stringify({ content }), {
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control":
+          "public, s-maxage=86400, stale-while-revalidate=86400",
       },
     });
+
+    await cache.put(cacheKey, response.clone());
+
+    return response;
   } catch (error: any) {
     // Log the full error for debugging
     console.error("API Error:", error);

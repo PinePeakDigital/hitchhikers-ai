@@ -1,5 +1,6 @@
 ---
 import { getLatestArticle } from "../lib/getLatestArticle";
+import { getIndex } from "../lib/indices";
 
 let articleCount = 0;
 let latestEntry = null;
@@ -8,8 +9,8 @@ try {
   const articles = Astro.locals.runtime?.env?.ARTICLES;
   const indices = Astro.locals.runtime?.env?.INDICES;
   if (articles && indices) {
-    const keys = await articles.list();
-    articleCount = keys.keys.length;
+    const index = await getIndex(articles, "articles", indices);
+    articleCount = index.length;
     latestEntry = await getLatestArticle(articles, indices);
   }
 } catch (error) {

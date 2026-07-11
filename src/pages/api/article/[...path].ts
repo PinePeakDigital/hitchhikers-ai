@@ -54,16 +54,29 @@ export function isValidArticlePath(path: string): boolean {
  * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
  */
 export async function GET({ params, locals, request }: APIContext) {
-  // `caches.default` is a Cloudflare Workers-specific API not present in the
-  // standard `CacheStorage` lib type, so we narrow to the workerd type here.
-  const cache = (caches as unknown as { default: Cache }).default;
-  const cacheKey = new Request(request.url, { method: "GET" });
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   try {
+    // `caches.default` is a Cloudflare Workers-specific API not present in the
+    // standard `CacheStorage` lib type, so we narrow to the workerd type here.
+    // The whole cache interaction lives inside the try/catch so that a missing
+    // runtime (e.g. `astro dev`, tests) or cache hiccup degrades to the KV path
+    // and the graceful 500 handler rather than throwing an uncaught error.
+    const cache =
+      typeof caches !== "undefined"
+        ? (caches as unknown as { default: Cache }).default
+        : undefined;
+    // Key on the URL path only (query string stripped) so extra query params
+    // can't fragment the cache or be used to trivially bust it — content
+    // depends solely on the validated article path.
+    const url = new URL(request.url);
+    const cacheKey = new Request(url.origin + url.pathname, { method: "GET" });
+
+    if (cache) {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const articles = locals.runtime?.env?.ARTICLES;
     const indices = locals.runtime?.env?.INDICES;
 
@@ -118,7 +131,9 @@ export async function GET({ params, locals, request }: APIContext) {
       },
     });
 
-    await cache.put(cacheKey, response.clone());
+    if (cache) {
+      await cache.put(cacheKey, response.clone());
+    }
 
     return response;
   } catch (error: any) {

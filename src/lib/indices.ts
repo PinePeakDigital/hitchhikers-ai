@@ -87,12 +87,13 @@ export async function updateIndex<T>(
 /**
  * Append a single entry to a cached index without re-listing the entire KV namespace.
  *
- * Reads the current index from `indices`, dedupes by `name` (replacing any existing entry
- * with the same name), appends the new entry, and writes the updated list back with the
- * standard 24-hour TTL, and invalidates the corresponding entry in Cloudflare's Workers
- * Cache (`caches.default`) so subsequent reads pick up the appended entry. If the index has
- * not been cached yet (null/missing), this is a no-op — the next consumer will rebuild it via
- * `getIndex` → `updateIndex`. If `indices` is missing entirely, returns early.
+ * Always invalidates the corresponding entry in Cloudflare's Workers Cache (`caches.default`)
+ * so subsequent reads can't be served a stale copy, then reads the current index from
+ * `indices`, dedupes by `name` (replacing any existing entry with the same name), appends the
+ * new entry, and writes the updated list back with the standard 24-hour TTL. If the index has
+ * not been cached in KV yet (null/missing), the KV write is a no-op — the next consumer rebuilds
+ * it via `getIndex` → `updateIndex` — but the Workers Cache is evicted regardless. If `indices`
+ * is missing entirely, returns early.
  *
  * @param indexKey - Which index to append to ("articles" or "searches").
  * @param entry - The KV key entry to append (must include `name` and optional `metadata`).
@@ -104,6 +105,13 @@ export async function appendToIndex<T>(
 ): Promise<void> {
   if (!indices) return;
 
+  // Evict the per-colo Workers Cache entry first, before the null-index bail-out
+  // below. The cache's max-age is refreshed on every `getIndex` read, so it can
+  // outlive the KV index's TTL. If we returned early without evicting, a warm but
+  // stale cache entry would keep masking this append (and the KV rebuild) until it
+  // expired on its own.
+  await workerCaches.default.delete(getCacheKey(indexKey));
+
   const index = await indices.get<KVNamespaceListKey<T>[]>(indexKey, "json");
 
   if (!index) return;
@@ -114,6 +122,4 @@ export async function appendToIndex<T>(
   await indices.put(indexKey, JSON.stringify(filtered), {
     expirationTtl: EXPIRATION_TTL,
   });
-
-  await workerCaches.default.delete(getCacheKey(indexKey));
 }

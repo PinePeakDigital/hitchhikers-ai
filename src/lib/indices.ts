@@ -1,4 +1,6 @@
-const EXPIRATION_TTL = 86400; /**
+const EXPIRATION_TTL = 86400;
+
+/**
  * Retrieve a cached list of KV keys for the given index, using the `indices` namespace when available.
  *
  * If a cached entry exists in `indices` for `indexKey`, that list is returned. If no cache entry
@@ -48,4 +50,35 @@ export async function updateIndex<T>(
   });
 
   return keys;
+}
+
+/**
+ * Append a single entry to a cached index without re-listing the entire KV namespace.
+ *
+ * Reads the current index from `indices`, dedupes by `name` (replacing any existing entry
+ * with the same name), appends the new entry, and writes the updated list back with the
+ * standard 24-hour TTL. If the index has not been cached yet (null/missing), this is a
+ * no-op — the next consumer will rebuild it via `getIndex` → `updateIndex`. If `indices`
+ * is missing entirely, returns early.
+ *
+ * @param indexKey - Which index to append to ("articles" or "searches").
+ * @param entry - The KV key entry to append (must include `name` and optional `metadata`).
+ */
+export async function appendToIndex<T>(
+  indices: KVNamespace | undefined,
+  indexKey: "articles" | "searches",
+  entry: KVNamespaceListKey<T>
+): Promise<void> {
+  if (!indices) return;
+
+  const index = await indices.get<KVNamespaceListKey<T>[]>(indexKey, "json");
+
+  if (!index) return;
+
+  const filtered = index.filter((existing) => existing.name !== entry.name);
+  filtered.push(entry);
+
+  await indices.put(indexKey, JSON.stringify(filtered), {
+    expirationTtl: EXPIRATION_TTL,
+  });
 }

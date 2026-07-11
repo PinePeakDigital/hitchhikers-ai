@@ -1,4 +1,9 @@
-const EXPIRATION_TTL = 2592000; // 30 days; index is kept fresh by incremental updates (#9)
+// 30 days. The "articles" index is kept fresh on writes by appendToIndex (#9), so the TTL is
+// just a cold-start/invalidation safety net rather than the correctness mechanism. Note the
+// "searches" index currently has no incremental writer, so it relies solely on this TTL to
+// pick up newly cached searches — it has no reader today, but keep that in mind before one is
+// added (see #16 discussion).
+const EXPIRATION_TTL = 2592000;
 const CACHE_MAX_AGE = 3600;
 
 // The DOM lib's `CacheStorage` doesn't expose `.default`, but Cloudflare Workers

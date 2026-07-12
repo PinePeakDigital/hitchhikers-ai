@@ -1,4 +1,9 @@
-const EXPIRATION_TTL = 86400;
+// 30 days. The "articles" index is kept fresh on writes by appendToIndex (#9), so the TTL is
+// just a cold-start/invalidation safety net rather than the correctness mechanism. Note the
+// "searches" index currently has no incremental writer, so it relies solely on this TTL to
+// pick up newly cached searches — it has no reader today, but keep that in mind before one is
+// added (see #16 discussion).
+const EXPIRATION_TTL = 2592000;
 const CACHE_MAX_AGE = 3600;
 
 // The DOM lib's `CacheStorage` doesn't expose `.default`, but Cloudflare Workers
@@ -56,10 +61,10 @@ export async function getIndex<T>(
 }
 
 /**
- * Refreshes and caches a list of keys from a KV namespace under a short-lived index.
+ * Refreshes and caches a list of keys from a KV namespace under a cached index.
  *
  * Retrieves all keys from `kv`, stores the JSON-serialized key list in `indices` at `indexKey`
- * with a 24-hour TTL, and returns the keys array. Also invalidates the corresponding entry in
+ * with a 30-day TTL, and returns the keys array. Also invalidates the corresponding entry in
  * Cloudflare's Workers Cache (`caches.default`) so subsequent reads pick up the fresh data.
  * If either `kv` or `indices` is missing, returns an empty array.
  *
@@ -90,7 +95,7 @@ export async function updateIndex<T>(
  * Always invalidates the corresponding entry in Cloudflare's Workers Cache (`caches.default`)
  * so subsequent reads can't be served a stale copy, then reads the current index from
  * `indices`, dedupes by `name` (replacing any existing entry with the same name), appends the
- * new entry, and writes the updated list back with the standard 24-hour TTL. If the index has
+ * new entry, and writes the updated list back with the standard 30-day TTL. If the index has
  * not been cached in KV yet (null/missing), the KV write is a no-op — the next consumer rebuilds
  * it via `getIndex` → `updateIndex` — but the Workers Cache is evicted regardless. If `indices`
  * is missing entirely, returns early.

@@ -47,11 +47,36 @@ export function isValidArticlePath(path: string): boolean {
  * a JSON response `{ content }`. On error returns a 500 JSON response with an `error`
  * message and a user-facing `content` notice.
  *
+ * Successful (200) responses are cached at the Cloudflare edge using the Workers Cache API
+ * keyed on the request URL, so repeat views skip the ARTICLES KV read entirely.
+ *
  * @param params.path - Route path captured by Astro; may be a string or string[] (arrays are joined with `/`)
  * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
  */
-export async function GET({ params, locals }: APIContext) {
+export async function GET({ params, locals, request }: APIContext) {
   try {
+    // `caches.default` is a Cloudflare Workers-specific API not present in the
+    // standard `CacheStorage` lib type, so we narrow to the workerd type here.
+    // The whole cache interaction lives inside the try/catch so that a missing
+    // runtime (e.g. `astro dev`, tests) or cache hiccup degrades to the KV path
+    // and the graceful 500 handler rather than throwing an uncaught error.
+    const cache =
+      typeof caches !== "undefined"
+        ? (caches as unknown as { default: Cache }).default
+        : undefined;
+    // Key on the URL path only (query string stripped) so extra query params
+    // can't fragment the cache or be used to trivially bust it — content
+    // depends solely on the validated article path.
+    const url = new URL(request.url);
+    const cacheKey = new Request(url.origin + url.pathname, { method: "GET" });
+
+    if (cache) {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const articles = locals.runtime?.env?.ARTICLES;
     const indices = locals.runtime?.env?.INDICES;
 
@@ -98,11 +123,19 @@ export async function GET({ params, locals }: APIContext) {
       throw new Error("No content generated");
     }
 
-    return new Response(JSON.stringify({ content }), {
+    const response = new Response(JSON.stringify({ content }), {
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control":
+          "public, s-maxage=86400, stale-while-revalidate=86400",
       },
     });
+
+    if (cache) {
+      await cache.put(cacheKey, response.clone());
+    }
+
+    return response;
   } catch (error: any) {
     // Log the full error for debugging
     console.error("API Error:", error);

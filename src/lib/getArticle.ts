@@ -21,6 +21,11 @@ async function getArticleText(ai: RateLimitedAI, formattedPath: string) {
          Write [A Good Towel](/towel) instead
       10. At most one link per sentence. Prose first, links second — an entry that is
           mostly links reads as a directory, not a Guide entry
+      11. A URL is ONE path segment: a single leading slash and no others. /babel-fish is
+          valid. /definitions/sanity and /galactic-directory/therapies are NOT — the Guide
+          has no sections, and such links lead nowhere
+      12. Do NOT open with a heading or the entry's title. The Guide renders the title
+          itself; start directly with the first sentence of prose
       
       Example of CORRECT linking (Use this style):
       "The [Babel Fish](/babel-fish) is a remarkable creature studied at the [Galactic Institute of Xenobiology](/galactic-institute-of-xenobiology). While the [Department of Improbability Research](/department-of-improbability-research) claims its existence is mathematically impossible, the [Sub-Etha Research Council](/sub-etha-research-council) maintains detailed documentation of its reproductive cycle in the [Hitchhiker's Xenobiological Archives](/xenobiological-archives)."
@@ -32,7 +37,7 @@ async function getArticleText(ai: RateLimitedAI, formattedPath: string) {
     },
     {
       role: "user",
-      content: `Write a Hitchhiker's Guide to the Galaxy style entry about "${formattedPath}". Make it humorous and slightly absurd, as if it's an entry in the actual Guide. Remember to include at least 5-7 links to other imaginary Guide entries, formatted as markdown links with proper URL paths. Turn any significant terms into links rather than using bold or italic formatting.`,
+      content: `Write a Hitchhiker's Guide to the Galaxy style entry about "${formattedPath}". Make it humorous and slightly absurd, as if it's an entry in the actual Guide. Include 5-8 links to other imaginary Guide entries, each a single-segment kebab-case path like /babel-fish. Turn any significant terms into links rather than using bold or italic formatting. Start with prose, not a heading.`,
     },
   ]);
 }

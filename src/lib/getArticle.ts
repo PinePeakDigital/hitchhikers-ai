@@ -90,6 +90,22 @@ async function getArticleImage(
 }
 
 /**
+ * Whether a stored ARTICLES value is really an outage notice rather than an article.
+ *
+ * Before the guard in `getArticle` existed, a rate-limited generation could be written to
+ * KV in either of two shapes: the notice alone, or — when the image call happened to
+ * succeed while the text call was rate-limited — an `<img>` tag prepended to it as
+ * `${image}\n\n${text}`. Both must be recognised, or a poisoned slug gets rendered as a
+ * real article and edge-cached for a day.
+ */
+function isOutageNotice(stored: string): boolean {
+  return (
+    stored === LIMIT_EXCEEDED_MESSAGE ||
+    stored.endsWith(`\n\n${LIMIT_EXCEEDED_MESSAGE}`)
+  );
+}
+
+/**
  * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the indices, and return the article rendered as HTML.
  *
  * This function:
@@ -121,7 +137,11 @@ export async function getArticle(
   // outage or rate limit used to take down every already-generated article.
   const cachedEntry = await articles.get(urlPath || "404", "text");
 
-  if (cachedEntry) {
+  // A slug poisoned by an earlier outage — the notice stored as its article, before
+  // the guard further down existed — is treated as a miss rather than rendered. That
+  // way it regenerates once the provider recovers instead of serving the notice
+  // forever, and marked() can't disguise it from the caller's identity check.
+  if (cachedEntry && !isOutageNotice(cachedEntry)) {
     return marked(cachedEntry);
   }
 

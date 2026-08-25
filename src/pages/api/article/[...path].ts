@@ -1,4 +1,5 @@
 import { getArticle } from "../../../lib/getArticle";
+import { LIMIT_EXCEEDED_MESSAGE } from "../../../lib/openai";
 import type { APIContext } from "astro";
 
 export const prerender = false;
@@ -48,7 +49,9 @@ export function isValidArticlePath(path: string): boolean {
  * message and a user-facing `content` notice.
  *
  * Successful (200) responses are cached at the Cloudflare edge using the Workers Cache API
- * keyed on the request URL, so repeat views skip the ARTICLES KV read entirely.
+ * keyed on the request URL, so repeat views skip the ARTICLES KV read entirely. Rate-limit and
+ * outage notices are returned as 200s but sent `no-store` and never cached, so a transient
+ * failure can't outlive the condition that produced it (see #25: failures aren't cached).
  *
  * @param params.path - Route path captured by Astro; may be a string or string[] (arrays are joined with `/`)
  * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
@@ -123,15 +126,22 @@ export async function GET({ params, locals, request }: APIContext) {
       throw new Error("No content generated");
     }
 
+    // A limit/outage notice is a temporary condition, not an article. Caching it
+    // would outlive the condition that produced it — a moments-long OpenAI blip
+    // would be served from the edge for a full day. Keep #25's rule intact:
+    // failures aren't cached, whichever side of the 200/500 line they land on.
+    const isNotice = content === LIMIT_EXCEEDED_MESSAGE;
+
     const response = new Response(JSON.stringify({ content }), {
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control":
-          "public, s-maxage=86400, stale-while-revalidate=86400",
+        "Cache-Control": isNotice
+          ? "no-store"
+          : "public, s-maxage=86400, stale-while-revalidate=86400",
       },
     });
 
-    if (cache) {
+    if (cache && !isNotice) {
       await cache.put(cacheKey, response.clone());
     }
 

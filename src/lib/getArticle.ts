@@ -90,17 +90,37 @@ async function getArticleImage(
 }
 
 /**
+ * Whether a stored ARTICLES value is really an outage notice rather than an article.
+ *
+ * Before the guard in `getArticle` existed, a rate-limited generation could be written to
+ * KV in either of two shapes: the notice alone, or — when the image call happened to
+ * succeed while the text call was rate-limited — an `<img>` tag prepended to it as
+ * `${image}\n\n${text}`. Both must be recognised, or a poisoned slug gets rendered as a
+ * real article and edge-cached for a day.
+ */
+function isOutageNotice(stored: string): boolean {
+  return (
+    stored === LIMIT_EXCEEDED_MESSAGE ||
+    stored.endsWith(`\n\n${LIMIT_EXCEEDED_MESSAGE}`)
+  );
+}
+
+/**
  * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the indices, and return the article rendered as HTML.
  *
  * This function:
- * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
  * - Normalizes `urlPath` into a human-friendly `formattedPath`.
- * - Returns a cached HTML article if present.
+ * - Returns a cached HTML article if present, without contacting OpenAI.
  * - If not cached, enforces usage limits and returns a limit message when exceeded.
+ * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
+ *   If the moderation check itself fails, returns the limit message rather than generating.
  * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
  *
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
- * @returns The article as HTML (marked output).
+ * @returns The article as HTML (marked output) when served from cache or freshly generated; otherwise the
+ * plain-text `LIMIT_EXCEEDED_MESSAGE` when the daily usage limit is spent, the moderation check itself
+ * fails, or generation is rate-limited upstream. Callers rely on that sentinel being returned by
+ * identity to detect a transient failure, so it is deliberately not passed through `marked()`.
  * @throws Error when the topic is deemed unsafe for work. Other errors encountered during generation are propagated to the caller.
  */
 export async function getArticle(
@@ -110,26 +130,53 @@ export async function getArticle(
   urlPath: string,
   indices: KVNamespace
 ) {
-  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
-  const isSafe = await openai.isSafe(urlPath);
-
-  if (!isSafe) {
-    throw new Error("This topic is not safe for work.");
-  }
-
   const formattedPath = urlPath?.replace(/[/-]/g, " ").trim() || "404";
+
+  // Serve from KV before touching OpenAI at all. Moderating a path we already
+  // have an article for is wasted spend, and — more importantly — an OpenAI
+  // outage or rate limit used to take down every already-generated article.
   const cachedEntry = await articles.get(urlPath || "404", "text");
 
-  if (cachedEntry) {
+  // A slug poisoned by an earlier outage — the notice stored as its article, before
+  // the guard further down existed — is treated as a miss rather than rendered. That
+  // way it regenerates once the provider recovers instead of serving the notice
+  // forever, and marked() can't disguise it from the caller's identity check.
+  if (cachedEntry && !isOutageNotice(cachedEntry)) {
     return marked(cachedEntry);
   }
+
+  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
 
   if (await openai.didExceedLimit()) {
     return LIMIT_EXCEEDED_MESSAGE;
   }
 
+  // Fail closed: if moderation is unavailable we don't generate, but we say so
+  // in the Guide's voice rather than throwing a 500 at the reader.
+  let isSafe: boolean;
+  try {
+    isSafe = await openai.isSafe(urlPath);
+  } catch (error) {
+    console.error("Moderation check failed:", error);
+    return LIMIT_EXCEEDED_MESSAGE;
+  }
+
+  if (!isSafe) {
+    throw new Error("This topic is not safe for work.");
+  }
+
   try {
     const text = await getArticleText(openai, formattedPath);
+
+    // createChatCompletion swallows a 429 and hands back the limit notice in a
+    // normal completion shape, so `text` can be the notice rather than an article.
+    // Storing it would poison the slug permanently — ARTICLES entries carry no TTL
+    // — and appendToIndex would then surface it in the random recommendations.
+    // getSearchResults guards its own KV write the same way.
+    if (text === LIMIT_EXCEEDED_MESSAGE) {
+      return LIMIT_EXCEEDED_MESSAGE;
+    }
+
     let guideEntry = text;
 
     try {

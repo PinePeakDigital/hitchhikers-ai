@@ -101,7 +101,8 @@ async function getArticleImage(
  * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
  *
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
- * @returns The article as HTML (marked output).
+ * @returns The article as HTML (marked output) when served from cache or freshly generated; otherwise the
+ * plain-text `LIMIT_EXCEEDED_MESSAGE` when the daily usage limit is spent or the moderation check itself fails.
  * @throws Error when the topic is deemed unsafe for work. Other errors encountered during generation are propagated to the caller.
  */
 export async function getArticle(
@@ -144,6 +145,16 @@ export async function getArticle(
 
   try {
     const text = await getArticleText(openai, formattedPath);
+
+    // createChatCompletion swallows a 429 and hands back the limit notice in a
+    // normal completion shape, so `text` can be the notice rather than an article.
+    // Storing it would poison the slug permanently — ARTICLES entries carry no TTL
+    // — and appendToIndex would then surface it in the random recommendations.
+    // getSearchResults guards its own KV write the same way.
+    if (text === LIMIT_EXCEEDED_MESSAGE) {
+      return LIMIT_EXCEEDED_MESSAGE;
+    }
+
     let guideEntry = text;
 
     try {

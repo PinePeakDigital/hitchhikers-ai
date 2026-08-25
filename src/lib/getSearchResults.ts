@@ -1,5 +1,5 @@
 import { marked } from "marked";
-import { RateLimitedOpenAI } from "./openai";
+import { LIMIT_EXCEEDED_MESSAGE, RateLimitedOpenAI } from "./openai";
 
 export async function getSearchResults(
   query: string,
@@ -18,7 +18,16 @@ export async function getSearchResults(
     return marked(cachedResults);
   }
 
-  const isSafe = await openai.isSafe(query);
+  // Fail closed: if moderation is unavailable we don't generate, but we say so in
+  // the Guide's voice rather than throwing a 500 at the reader. An unguarded call
+  // here is what took the article path down during an OpenAI outage.
+  let isSafe: boolean;
+  try {
+    isSafe = await openai.isSafe(query);
+  } catch (error) {
+    console.error("Moderation check failed:", error);
+    return LIMIT_EXCEEDED_MESSAGE;
+  }
 
   if (!isSafe) {
     return "This topic is not safe for work.";
@@ -43,7 +52,7 @@ export async function getSearchResults(
   const content = completion.choices[0].message.content || "";
 
   // Only cache if it's not a limit exceeded response
-  if (!content.includes("currently overloaded with requests")) {
+  if (content !== LIMIT_EXCEEDED_MESSAGE) {
     await searches.put(query, content);
   }
 

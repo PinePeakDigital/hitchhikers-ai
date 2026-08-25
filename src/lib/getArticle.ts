@@ -93,10 +93,11 @@ async function getArticleImage(
  * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the indices, and return the article rendered as HTML.
  *
  * This function:
- * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
  * - Normalizes `urlPath` into a human-friendly `formattedPath`.
- * - Returns a cached HTML article if present.
+ * - Returns a cached HTML article if present, without contacting OpenAI.
  * - If not cached, enforces usage limits and returns a limit message when exceeded.
+ * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
+ *   If the moderation check itself fails, returns the limit message rather than generating.
  * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
  *
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
@@ -110,22 +111,35 @@ export async function getArticle(
   urlPath: string,
   indices: KVNamespace
 ) {
-  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
-  const isSafe = await openai.isSafe(urlPath);
-
-  if (!isSafe) {
-    throw new Error("This topic is not safe for work.");
-  }
-
   const formattedPath = urlPath?.replace(/[/-]/g, " ").trim() || "404";
+
+  // Serve from KV before touching OpenAI at all. Moderating a path we already
+  // have an article for is wasted spend, and — more importantly — an OpenAI
+  // outage or rate limit used to take down every already-generated article.
   const cachedEntry = await articles.get(urlPath || "404", "text");
 
   if (cachedEntry) {
     return marked(cachedEntry);
   }
 
+  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
+
   if (await openai.didExceedLimit()) {
     return LIMIT_EXCEEDED_MESSAGE;
+  }
+
+  // Fail closed: if moderation is unavailable we don't generate, but we say so
+  // in the Guide's voice rather than throwing a 500 at the reader.
+  let isSafe: boolean;
+  try {
+    isSafe = await openai.isSafe(urlPath);
+  } catch (error) {
+    console.error("Moderation check failed:", error);
+    return LIMIT_EXCEEDED_MESSAGE;
+  }
+
+  if (!isSafe) {
+    throw new Error("This topic is not safe for work.");
   }
 
   try {

@@ -6,7 +6,7 @@
  * request logging, cost tracking, caching and retries.
  */
 
-const TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const TEXT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 const IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
 const SAFETY_MODEL = "@cf/meta/llama-guard-3-8b";
 
@@ -15,6 +15,32 @@ const SAFETY_MODEL = "@cf/meta/llama-guard-3-8b";
 const IMAGE_STEPS = 4;
 
 const IMAGE_TIMEOUT = 10000;
+const TEXT_TIMEOUT = 20000;
+const SAFETY_TIMEOUT = 10000;
+
+/**
+ * Bound an inference call in wall-clock time.
+ *
+ * An unbounded provider call on the request path is what took the Guide down once
+ * already: a hung upstream never reaches a `catch`, so the request hangs until the
+ * Worker itself is killed and the reader gets nothing. Losing the race doesn't cancel
+ * the underlying request — the binding takes no abort signal — it just stops us
+ * waiting on it.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export const LIMIT_EXCEEDED_MESSAGE =
   "The Guide's computational circuits are currently overloaded with requests from various parts of the galaxy. Please try again tomorrow. DON'T PANIC - this is a temporary measure to prevent the heat death of the universe.";
@@ -31,11 +57,12 @@ interface DailyUsage {
 }
 
 /**
- * Workers AI grants a free Neuron allocation that resets daily and then hard-fails,
- * so this is a guard against overage billing on paid accounts rather than the sole
- * defence it had to be when inference was billed to an unbounded external account.
- * Counted in requests: the binding doesn't report token usage for text generation,
- * and `max_tokens` bounds the cost of any single call anyway.
+ * Workers AI's free Neuron allocation (10,000/day) resets at 00:00 UTC. On the Free
+ * plan further calls then hard-fail; on Workers Paid they overage-bill at
+ * $0.011/1,000 Neurons instead — so this limiter exists to cap that spend, rather
+ * than being the sole defence it had to be when inference was billed to an unbounded
+ * external account. Counted in requests: the binding doesn't report token usage for
+ * text generation, and `max_tokens` bounds the cost of any single call anyway.
  */
 const MAX_GENERATIONS_PER_DAY = 300;
 const MAX_IMAGES_PER_DAY = 50;
@@ -134,10 +161,10 @@ export class RateLimitedAI {
     }
 
     try {
-      const result = await this.ai.run(
-        TEXT_MODEL,
-        { messages, max_tokens: maxTokens },
-        this.options()
+      const result = await withTimeout(
+        this.ai.run(TEXT_MODEL, { messages, max_tokens: maxTokens }, this.options()),
+        TEXT_TIMEOUT,
+        "Text generation"
       );
 
       await this.recordUsage(today, { generation: true });
@@ -164,18 +191,12 @@ export class RateLimitedAI {
       return null;
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), IMAGE_TIMEOUT);
-
     try {
-      const result = await Promise.race([
+      const result = await withTimeout(
         this.ai.run(IMAGE_MODEL, { prompt, steps: IMAGE_STEPS }, this.options()),
-        new Promise<never>((_, reject) => {
-          controller.signal.addEventListener("abort", () => {
-            reject(new Error(`Image generation timed out after ${IMAGE_TIMEOUT}ms`));
-          });
-        }),
-      ]);
+        IMAGE_TIMEOUT,
+        "Image generation"
+      );
 
       const image = (result as { image?: string }).image;
       if (!image) return null;
@@ -185,8 +206,6 @@ export class RateLimitedAI {
     } catch (error) {
       console.error("Workers AI image generation failed:", error);
       return null;
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
 
@@ -197,13 +216,17 @@ export class RateLimitedAI {
    * an unavailable safety check must never read as "safe".
    */
   async isSafe(input: string): Promise<boolean> {
-    const result = await this.ai.run(
-      SAFETY_MODEL,
-      {
-        messages: [{ role: "user" as const, content: input }],
-        response_format: { type: "json_object" },
-      },
-      this.options()
+    const result = await withTimeout(
+      this.ai.run(
+        SAFETY_MODEL,
+        {
+          messages: [{ role: "user" as const, content: input }],
+          response_format: { type: "json_object" },
+        },
+        this.options()
+      ),
+      SAFETY_TIMEOUT,
+      "Moderation"
     );
 
     const response = (result as { response?: string | { safe?: boolean } }).response;

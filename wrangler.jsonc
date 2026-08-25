@@ -10,7 +10,10 @@
 		"enabled": true
 	},
 	"ai": {
-		"binding": "AI"
+		"binding": "AI",
+		// Inference has no local emulation, so dev talks to the real Workers AI.
+		// KV stays local, so dev never touches production article data.
+		"remote": true
 	},
 	"kv_namespaces": [
 		{

@@ -102,7 +102,9 @@ async function getArticleImage(
  *
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
  * @returns The article as HTML (marked output) when served from cache or freshly generated; otherwise the
- * plain-text `LIMIT_EXCEEDED_MESSAGE` when the daily usage limit is spent or the moderation check itself fails.
+ * plain-text `LIMIT_EXCEEDED_MESSAGE` when the daily usage limit is spent, the moderation check itself
+ * fails, or generation is rate-limited upstream. Callers rely on that sentinel being returned by
+ * identity to detect a transient failure, so it is deliberately not passed through `marked()`.
  * @throws Error when the topic is deemed unsafe for work. Other errors encountered during generation are propagated to the caller.
  */
 export async function getArticle(

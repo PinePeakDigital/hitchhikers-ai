@@ -51,10 +51,14 @@ export async function getSearchResults(
 
   const content = completion.choices[0].message.content || "";
 
-  // Only cache if it's not a limit exceeded response
-  if (content !== LIMIT_EXCEEDED_MESSAGE) {
-    await searches.put(query, content);
+  // createChatCompletion returns the notice in a normal completion shape when it
+  // swallows a 429, so bail before storing it — and return it raw, matching the
+  // moderation-failure path above rather than rendering the same string two ways.
+  if (content === LIMIT_EXCEEDED_MESSAGE) {
+    return LIMIT_EXCEEDED_MESSAGE;
   }
+
+  await searches.put(query, content);
 
   return marked(content);
 }

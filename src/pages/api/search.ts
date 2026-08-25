@@ -18,8 +18,9 @@ export async function GET({ url, locals }: APIContext) {
     const content = await getSearchResults(
       query,
       locals.runtime.env.SEARCHES,
-      locals.runtime.env.OPENAI_API_KEY,
-      locals.runtime.env.TOKEN_USAGE
+      locals.runtime.env.AI,
+      locals.runtime.env.TOKEN_USAGE,
+      locals.runtime.env.AI_GATEWAY_ID
     );
 
     return new Response(JSON.stringify({ content }), {

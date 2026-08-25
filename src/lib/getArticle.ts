@@ -1,12 +1,9 @@
 import { appendToIndex } from "./indices";
-import { LIMIT_EXCEEDED_MESSAGE, RateLimitedOpenAI } from "./openai";
+import { LIMIT_EXCEEDED_MESSAGE, RateLimitedAI } from "./ai";
 import { marked } from "marked";
 
-async function getArticleText(
-  openai: RateLimitedOpenAI,
-  formattedPath: string
-) {
-  const completion = await openai.createChatCompletion([
+async function getArticleText(ai: RateLimitedAI, formattedPath: string) {
+  return ai.createText([
     {
       role: "system",
       content: `You are the Hitchhiker's Guide to the Galaxy. Write entries in Douglas Adams' style with wit and humor. Begin your entry with a factual statement about the topic. Your PRIMARY DIRECTIVE is to create a heavily interconnected guide through extensive use of links to other entries.
@@ -33,42 +30,46 @@ async function getArticleText(
       content: `Write a Hitchhiker's Guide to the Galaxy style entry about "${formattedPath}". Make it humorous and slightly absurd, as if it's an entry in the actual Guide. Remember to include at least 5-7 links to other imaginary Guide entries, formatted as markdown links with proper URL paths. Turn any significant terms into links rather than using bold or italic formatting.`,
     },
   ]);
-
-  return completion.choices[0].message.content || "";
 }
 
 async function getArticleImage(
-  openai: RateLimitedOpenAI,
+  ai: RateLimitedAI,
   formattedPath: string
 ): Promise<string | null> {
   try {
-    if (await openai.didExceedImageLimit()) {
+    if (await ai.didExceedImageLimit()) {
       console.log("Image limit exceeded, skipping image generation");
       return null;
     }
 
-    const promptCompletion = await openai.createChatCompletion([
-      {
-        role: "system",
-        content:
-          "Create a simple, visual prompt for DALL-E. Focus on physical objects and scenes, not concepts. Describe only what the image should look like in concrete terms. Keep it under 50 words. Format: 'digital art: [description]'. Example: 'digital art: a blue alien fish wearing headphones, swimming through space, colorful nebulas in background, retro sci-fi style'",
-      },
-      {
-        role: "user",
-        content: `Create a simple visual prompt for this Guide entry about "${formattedPath}". Make it retro sci-fi style, colorful, and slightly absurd.`,
-      },
-    ]);
+    const fallbackPrompt = `digital art: a retro sci-fi scene related to ${formattedPath}, colorful and quirky, in the style of a 1970s science fiction book cover`;
 
+    const promptText = await ai.createText(
+      [
+        {
+          role: "system",
+          content:
+            "Create a simple, visual prompt for a text-to-image model. Focus on physical objects and scenes, not concepts. Describe only what the image should look like in concrete terms. Keep it under 50 words. Format: 'digital art: [description]'. Example: 'digital art: a blue alien fish wearing headphones, swimming through space, colorful nebulas in background, retro sci-fi style'",
+        },
+        {
+          role: "user",
+          content: `Create a simple visual prompt for this Guide entry about "${formattedPath}". Make it retro sci-fi style, colorful, and slightly absurd.`,
+        },
+      ],
+      { maxTokens: 128 }
+    );
+
+    // A rate-limited prompt call yields the notice, which would be a nonsense image
+    // prompt — fall back to a generic one rather than drawing the error message.
     const imagePrompt =
-      promptCompletion.choices[0].message.content ||
-      `digital art: a retro sci-fi scene related to ${formattedPath}, colorful and quirky, in the style of a 1970s science fiction book cover`;
+      promptText === LIMIT_EXCEEDED_MESSAGE ? fallbackPrompt : promptText;
 
     console.log("Attempting image generation with prompt:", imagePrompt);
 
     try {
-      const image = await openai.createImage(imagePrompt);
+      const image = await ai.createImage(imagePrompt);
       return image
-        ? `<img src="data:image/png;base64,${image}" alt="${formattedPath}" width="200" height="200" />`
+        ? `<img src="data:image/jpeg;base64,${image}" alt="${formattedPath}" width="200" height="200" />`
         : null;
     } catch (imageError: any) {
       console.error("Image generation error details:", {
@@ -116,6 +117,8 @@ function isOutageNotice(stored: string): boolean {
  *   If the moderation check itself fails, returns the limit message rather than generating.
  * - Generates article text and an optional image, prefixes the image to the article when produced, stores the result in `articles`, updates the index via `indices`, and returns the article HTML.
  *
+ * @param ai - The Workers AI binding.
+ * @param gatewayId - Optional AI Gateway id; when set, inference is routed through it.
  * @param urlPath - The requested path (e.g., "/some-topic"); used to look up and name the article. An empty or missing `urlPath` is treated as "404".
  * @returns The article as HTML (marked output) when served from cache or freshly generated; otherwise the
  * plain-text `LIMIT_EXCEEDED_MESSAGE` when the daily usage limit is spent, the moderation check itself
@@ -124,11 +127,12 @@ function isOutageNotice(stored: string): boolean {
  * @throws Error when the topic is deemed unsafe for work. Other errors encountered during generation are propagated to the caller.
  */
 export async function getArticle(
-  apiKey: string,
-  tokenUsage: any,
+  ai: Ai,
+  tokenUsage: KVNamespace,
   articles: KVNamespace,
   urlPath: string,
-  indices: KVNamespace
+  indices: KVNamespace,
+  gatewayId?: string
 ) {
   const formattedPath = urlPath?.replace(/[/-]/g, " ").trim() || "404";
 
@@ -145,9 +149,9 @@ export async function getArticle(
     return marked(cachedEntry);
   }
 
-  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
+  const client = new RateLimitedAI(ai, tokenUsage, gatewayId);
 
-  if (await openai.didExceedLimit()) {
+  if (await client.didExceedLimit()) {
     return LIMIT_EXCEEDED_MESSAGE;
   }
 
@@ -155,7 +159,7 @@ export async function getArticle(
   // in the Guide's voice rather than throwing a 500 at the reader.
   let isSafe: boolean;
   try {
-    isSafe = await openai.isSafe(urlPath);
+    isSafe = await client.isSafe(urlPath);
   } catch (error) {
     console.error("Moderation check failed:", error);
     return LIMIT_EXCEEDED_MESSAGE;
@@ -166,7 +170,7 @@ export async function getArticle(
   }
 
   try {
-    const text = await getArticleText(openai, formattedPath);
+    const text = await getArticleText(client, formattedPath);
 
     // createChatCompletion swallows a 429 and hands back the limit notice in a
     // normal completion shape, so `text` can be the notice rather than an article.
@@ -180,7 +184,7 @@ export async function getArticle(
     let guideEntry = text;
 
     try {
-      const image = await getArticleImage(openai, formattedPath);
+      const image = await getArticleImage(client, formattedPath);
       if (image) {
         guideEntry = `${image}\n\n${text}`;
       }

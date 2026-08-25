@@ -1,1 +1,3 @@
-OPENAI_API_KEY=the_api_key
+# Optional. When set, Workers AI inference is routed through this AI Gateway
+# for request logging, cost tracking and retries. Inference works without it.
+AI_GATEWAY_ID=your_gateway_id

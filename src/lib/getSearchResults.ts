@@ -1,17 +1,18 @@
 import { marked } from "marked";
-import { LIMIT_EXCEEDED_MESSAGE, RateLimitedOpenAI } from "./openai";
+import { LIMIT_EXCEEDED_MESSAGE, RateLimitedAI } from "./ai";
 
 export async function getSearchResults(
   query: string,
   searches: KVNamespace,
-  apiKey: string,
-  tokenUsage: KVNamespace
+  ai: Ai,
+  tokenUsage: KVNamespace,
+  gatewayId?: string
 ): Promise<string> {
   if (!query) {
     return "No query provided";
   }
 
-  const openai = new RateLimitedOpenAI(apiKey, tokenUsage);
+  const client = new RateLimitedAI(ai, tokenUsage, gatewayId);
   const cachedResults = await searches.get(query, "text");
 
   if (cachedResults) {
@@ -23,7 +24,7 @@ export async function getSearchResults(
   // here is what took the article path down during an OpenAI outage.
   let isSafe: boolean;
   try {
-    isSafe = await openai.isSafe(query);
+    isSafe = await client.isSafe(query);
   } catch (error) {
     console.error("Moderation check failed:", error);
     return LIMIT_EXCEEDED_MESSAGE;
@@ -33,7 +34,7 @@ export async function getSearchResults(
     return "This topic is not safe for work.";
   }
 
-  const completion = await openai.createChatCompletion([
+  const content = await client.createText([
     {
       role: "system",
       content:
@@ -49,11 +50,9 @@ export async function getSearchResults(
     },
   ]);
 
-  const content = completion.choices[0].message.content || "";
-
-  // createChatCompletion returns the notice in a normal completion shape when it
-  // swallows a 429, so bail before storing it — and return it raw, matching the
-  // moderation-failure path above rather than rendering the same string two ways.
+  // createText returns the notice when inference fails or the daily budget is spent,
+  // so bail before storing it — and return it raw, matching the moderation-failure
+  // path above rather than rendering the same string two ways.
   if (content === LIMIT_EXCEEDED_MESSAGE) {
     return LIMIT_EXCEEDED_MESSAGE;
   }

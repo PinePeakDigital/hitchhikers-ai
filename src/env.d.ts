@@ -4,7 +4,9 @@ type ENV = {
   ARTICLES: KVNamespace;
   SEARCHES: KVNamespace;
   INDICES: KVNamespace;
-  OPENAI_API_KEY: string;
+  AI: Ai;
+  /** Optional. When set, Workers AI calls are routed through this AI Gateway. */
+  AI_GATEWAY_ID?: string;
 };
 type Runtime = import("@astrojs/cloudflare").Runtime<ENV>;
 declare namespace App {

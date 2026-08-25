@@ -1,5 +1,5 @@
 import { getArticle } from "../../../lib/getArticle";
-import { LIMIT_EXCEEDED_MESSAGE } from "../../../lib/openai";
+import { LIMIT_EXCEEDED_MESSAGE } from "../../../lib/ai";
 import type { APIContext } from "astro";
 
 export const prerender = false;
@@ -115,11 +115,12 @@ export async function GET({ params, locals, request }: APIContext) {
     }
 
     const content = await getArticle(
-      locals.runtime.env.OPENAI_API_KEY,
+      locals.runtime.env.AI,
       locals.runtime.env.TOKEN_USAGE,
       articles,
       articlePath,
-      indices
+      indices,
+      locals.runtime.env.AI_GATEWAY_ID
     );
 
     if (!content) {

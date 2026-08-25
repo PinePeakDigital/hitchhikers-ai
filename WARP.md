@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-hitchhikers-ai is an Astro-based web application that generates Hitchhiker's Guide to the Galaxy-style articles using OpenAI's API. The application runs on Cloudflare Pages with server-side rendering, utilizing Cloudflare Workers for API routes and KV storage for caching.
+hitchhikers-ai is an Astro-based web application that generates Hitchhiker's Guide to the Galaxy-style articles using Cloudflare Workers AI. The application runs as a Cloudflare Worker with server-side rendering, using KV for caching and the `AI` binding for inference — there are no external AI provider accounts or API keys.
 
 ## Development Commands
 
@@ -41,10 +41,11 @@ pnpm wrangler kv namespace create ARTICLES
 pnpm wrangler kv namespace create SEARCHES
 
 # View live logs
-pnpm wrangler pages deployment tail
+pnpm wrangler tail
 
-# Manage secrets
-pnpm wrangler secret put OPENAI_API_KEY
+# Inference runs through the AI binding — no secrets to manage.
+# Optionally route it through an AI Gateway for logging and cost tracking:
+pnpm wrangler secret put AI_GATEWAY_ID
 
 # Clear caches (uses custom script)
 ./scripts/clear-cache.sh
@@ -55,24 +56,31 @@ pnpm wrangler secret put OPENAI_API_KEY
 ### Request Flow
 1. **Astro SSR**: Handles initial page rendering and routing via `[...path].astro`
 2. **API Routes**: Server endpoints in `src/pages/api/` handle dynamic content generation
-3. **Rate Limiting**: `RateLimitedOpenAI` class enforces daily token/image limits via KV storage
+3. **Rate Limiting**: `RateLimitedAI` class enforces daily generation/image limits via KV storage
 4. **Caching Layer**: Articles and search results cached in Cloudflare KV namespaces
-5. **AI Generation**: OpenAI GPT models generate content with Douglas Adams-style prompts
+5. **AI Generation**: Workers AI models generate content with Douglas Adams-style prompts
 
 ### Core Components
 
-**Rate-Limited OpenAI Client** (`src/lib/openai.ts`):
-- Wraps OpenAI API with daily usage limits (100k tokens, 10 images)
-- Tracks usage in `TOKEN_USAGE` KV namespace with 24h TTL
-- Handles moderation checks and timeout management
+**Rate-Limited AI Client** (`src/lib/ai.ts`):
+- Wraps the Workers AI binding with daily usage limits (300 generations, 50 images)
+- Models: `@cf/meta/llama-3.1-8b-instruct` (text), `@cf/black-forest-labs/flux-1-schnell`
+  (images), `@cf/meta/llama-guard-3-8b` (moderation)
+- Tracks usage in `TOKEN_USAGE` KV namespace with 24h TTL. Counted in requests, not
+  tokens — the binding doesn't report token usage for text generation, and `max_tokens`
+  bounds any single call
+- Routes through an AI Gateway when `AI_GATEWAY_ID` is set, which adds logging, cost
+  tracking and retries
+- `createText` returns `LIMIT_EXCEEDED_MESSAGE` on failure; `isSafe` throws, so callers
+  fail closed
 
 **Article Generation** (`src/lib/getArticle.ts`):
 - Creates Guide entries with extensive cross-linking requirements
-- Generates accompanying images via DALL-E when under limits
+- Generates accompanying images via Flux when under limits
 - Caches complete articles in `ARTICLES` KV namespace
 
 **Search System** (`src/lib/getSearchResults.ts`):
-- Generates themed search results using GPT
+- Generates themed search results using Workers AI
 - Results cached in `SEARCHES` KV namespace
 - Each result includes properly formatted internal links
 
@@ -88,14 +96,20 @@ pnpm wrangler secret put OPENAI_API_KEY
 Copy `.dev.vars.example` to `.dev.vars` and configure:
 
 ```
-OPENAI_API_KEY=your_openai_api_key_here
+# Optional — routes inference through an AI Gateway for logging and cost tracking.
+AI_GATEWAY_ID=your_gateway_id
 ```
 
+Workers AI inference requires `wrangler dev --remote`. Under plain `wrangler dev --local`
+the AI binding is unavailable, so generation degrades to the themed notice — which is
+useful for exercising the failure paths offline, but means new articles can't be
+generated locally.
+
 ### Production Secrets
-Set via Wrangler CLI:
+No AI provider keys are required. Optionally:
 
 ```bash
-pnpm wrangler secret put OPENAI_API_KEY
+pnpm wrangler secret put AI_GATEWAY_ID
 ```
 
 ### KV Namespace Bindings
@@ -152,7 +166,7 @@ The system uses specific prompts that enforce:
 
 ### Rate Limiting Strategy
 - Daily limits reset at midnight UTC using date-based KV keys
-- Token usage tracked across all OpenAI API calls
+- Generation and image counts tracked across all Workers AI calls
 - Image generation limited separately with timeout protection
 - Graceful degradation with themed error messages
 

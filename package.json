@@ -11,16 +11,16 @@
     "knip": "knip"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^12.6.13",
-    "astro": "^5.18.2",
-    "marked": "^15.0.12"
+    "@astrojs/cloudflare": "^14.2.5",
+    "astro": "^7.2.9",
+    "marked": "^18.0.11"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.4",
-    "@cloudflare/workers-types": "^4.20250913.0",
-    "@types/node": "^24.5.0",
-    "knip": "^5.63.1",
-    "typescript": "^5.9.2",
+    "@astrojs/check": "^0.9.10",
+    "@cloudflare/workers-types": "^5.20260828.1",
+    "@types/node": "^26.4.0",
+    "knip": "^6.33.0",
+    "typescript": "^7.0.2",
     "wrangler": "^4.128.0"
   },
   "pnpm": {

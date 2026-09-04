@@ -1,0 +1,51 @@
+# Runs on pull requests, which nothing did before this.
+#
+# deploy.yml only fires on push to main, so a PR here reported "all checks
+# passed" while nothing had looked at it. That let a half-finished Astro 7
+# bump (#45) merge on a green tick and break the deploy for 47 minutes on
+# 2026-09-04; two more dependency PRs were sitting green at the same time,
+# both of which would also have failed the build.
+#
+# Steps mirror deploy.yml deliberately, so a green run here means the same
+# work the deploy will attempt actually succeeds. No Cloudflare secrets:
+# `wrangler types` generates from wrangler.jsonc and needs no auth, and this
+# must never be able to deploy.
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.6.1
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+
+      # --frozen-lockfile is load-bearing: it is what catches a dependency PR
+      # whose lockfile disagrees with package.json, which is precisely how the
+      # Astro 7 breakage reached main.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Type check
+        run: pnpm check

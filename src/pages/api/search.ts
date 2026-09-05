@@ -1,9 +1,10 @@
+import { env } from "cloudflare:workers";
 import { getSearchResults } from "../../lib/getSearchResults";
 import type { APIContext } from "astro";
 
 export const prerender = false;
 
-export async function GET({ url, locals }: APIContext) {
+export async function GET({ url }: APIContext) {
   try {
     const query = url.searchParams.get("q") || "";
 
@@ -17,10 +18,10 @@ export async function GET({ url, locals }: APIContext) {
 
     const content = await getSearchResults(
       query,
-      locals.runtime.env.SEARCHES,
-      locals.runtime.env.AI,
-      locals.runtime.env.TOKEN_USAGE,
-      locals.runtime.env.AI_GATEWAY_ID
+      env.SEARCHES,
+      env.AI,
+      env.TOKEN_USAGE,
+      env.AI_GATEWAY_ID
     );
 
     return new Response(JSON.stringify({ content }), {

@@ -1,15 +1,16 @@
 ---
+import { env } from "cloudflare:workers";
 import { getRandomKeys } from "../lib/getRandomKeys";
 
 export const prerender = false;
 
 try {
-  const articles = Astro.locals.runtime?.env?.ARTICLES;
+  const articles = env.ARTICLES;
   if (articles) {
     const randomKey = await getRandomKeys({
       kv: articles,
       indexKey: "articles",
-      indices: Astro.locals.runtime?.env?.INDICES,
+      indices: env.INDICES,
       count: 1,
     }).then((keys) => keys[0]);
 

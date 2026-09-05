@@ -1,4 +1,5 @@
 ---
+import { env } from "cloudflare:workers";
 import Layout from "../layouts/Layout.astro";
 import { getRandomKeys } from "../lib/getRandomKeys";
 import { isValidArticlePath } from "./api/article/[...path]";
@@ -14,8 +15,8 @@ if (!pathIsValid) {
 // Get 3 random articles for recommendations
 let recommendations: { path: string; title: string }[] = [];
 try {
-  const articles = Astro.locals.runtime?.env?.ARTICLES;
-  const indices = Astro.locals.runtime?.env?.INDICES;
+  const articles = env.ARTICLES;
+  const indices = env.INDICES;
   if (articles && indices) {
     const keys = await getRandomKeys({
       kv: articles,

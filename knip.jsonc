@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // `cloudflare:workers` is a Workers-runtime built-in module (like `node:fs`),
+  // not an npm package. Knip doesn't yet recognize the `cloudflare:` protocol
+  // as a built-in, so it flags every import of it as an unlisted dependency
+  // named "cloudflare".
+  "ignoreDependencies": ["cloudflare"]
+}

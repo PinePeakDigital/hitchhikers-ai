@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { getArticle } from "../../../lib/getArticle";
 import { LIMIT_EXCEEDED_MESSAGE } from "../../../lib/ai";
 import type { APIContext } from "astro";
@@ -42,7 +43,7 @@ export function isValidArticlePath(path: string): boolean {
 /**
  * HTTP GET handler that generates article content from storage and returns it as JSON.
  *
- * Reads ARTICLES and INDICES from `locals.runtime.env`, validates their presence, normalizes
+ * Reads ARTICLES and INDICES from the `cloudflare:workers` `env`, validates their presence, normalizes
  * the incoming `params.path` (joins arrays with `/`, falls back to `"404"` when empty),
  * and calls `getArticle` with the OpenAI API key and token usage flags. On success returns
  * a JSON response `{ content }`. On error returns a 500 JSON response with an `error`
@@ -56,7 +57,7 @@ export function isValidArticlePath(path: string): boolean {
  * @param params.path - Route path captured by Astro; may be a string or string[] (arrays are joined with `/`)
  * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
  */
-export async function GET({ params, locals, request }: APIContext) {
+export async function GET({ params, request }: APIContext) {
   try {
     // `caches.default` is a Cloudflare Workers-specific API not present in the
     // standard `CacheStorage` lib type, so we narrow to the workerd type here.
@@ -80,8 +81,8 @@ export async function GET({ params, locals, request }: APIContext) {
       }
     }
 
-    const articles = locals.runtime?.env?.ARTICLES;
-    const indices = locals.runtime?.env?.INDICES;
+    const articles = env.ARTICLES;
+    const indices = env.INDICES;
 
     if (!articles || !indices) {
       throw new Error("Article or index storage not available");
@@ -115,12 +116,12 @@ export async function GET({ params, locals, request }: APIContext) {
     }
 
     const content = await getArticle(
-      locals.runtime.env.AI,
-      locals.runtime.env.TOKEN_USAGE,
+      env.AI,
+      env.TOKEN_USAGE,
       articles,
       articlePath,
       indices,
-      locals.runtime.env.AI_GATEWAY_ID
+      env.AI_GATEWAY_ID
     );
 
     if (!content) {

@@ -1,0 +1,96 @@
+name: Sync Dependabot Lockfile
+
+# Dependabot's pnpm support updates resolved versions in pnpm-lock.yaml but can
+# leave the `specifier:` fields in the importers section pointing at the old
+# version. That causes `pnpm install --frozen-lockfile` to fail in CI on every
+# bump. This workflow regenerates the lockfile and pushes it back to the PR
+# branch, which re-runs CI green.
+#
+# Why workflow_run (NOT pull_request_target): a workflow triggered *directly* by
+# a Dependabot PR gets a read-only GITHUB_TOKEN and NO secrets at all — neither
+# the Actions nor the Dependabot store — so it can't read an app token to push.
+# See https://docs.github.com/en/code-security/getting-started/understanding-github-secret-types
+# workflow_run fires AFTER the CI workflow finishes, runs in the trusted
+# default-branch context, is not subject to the Dependabot restrictions, and so
+# CAN read Actions secrets. A GitHub App token (not GITHUB_TOKEN) is required to
+# push, because commits pushed with GITHUB_TOKEN don't re-trigger CI.
+#
+# REQUIRED SETUP — the secrets live in the *Actions* secret store (workflow_run
+# reads Actions secrets):
+#
+#   gh secret set LOCKFILE_BOT_APP_ID --app actions --body <app-id>
+#   gh secret set LOCKFILE_BOT_PRIVATE_KEY --app actions < private-key.pem
+#
+# The backing GitHub App needs `contents: write` and must be installed on this
+# repo. This workflow only takes effect once it is merged to the default branch
+# (workflow_run only fires for workflows present on the default branch).
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: sync-lockfile-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  sync-lockfile:
+    # Only act on CI runs from Dependabot's own branch pushes, in this repo (not
+    # forks — the app token can only push here). The app's later push re-runs CI
+    # as a non-Dependabot actor, so this job doesn't re-fire on it: no loop.
+    if: >-
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.LOCKFILE_BOT_APP_ID }}
+          private-key: ${{ secrets.LOCKFILE_BOT_PRIVATE_KEY }}
+          # Least privilege: the workflow only reads, updates, and pushes
+          # pnpm-lock.yaml, so scope the token to repo contents.
+          permission-contents: write
+
+      - name: Checkout Dependabot branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Look up app bot user id
+        id: bot-user
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          user_id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)
+          echo "id=${user_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Install tools via asdf
+        uses: asdf-vm/actions/install@b7bcd026f18772e44fe1026d729e1611cc435d47 # v4.0.1
+
+      - name: Regenerate pnpm lockfile
+        env:
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+        run: pnpm install --lockfile-only --ignore-scripts
+
+      - name: Commit and push if lockfile changed
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_HEAD_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [[ -z "$(git status --porcelain pnpm-lock.yaml)" ]]; then
+            echo "Lockfile already in sync — nothing to do."
+            exit 0
+          fi
+
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.bot-user.outputs.id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          git commit -m "chore(deps): sync pnpm-lock.yaml specifier fields"
+          git push "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${PR_HEAD_REF}"

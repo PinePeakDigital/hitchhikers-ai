@@ -15,6 +15,16 @@ name: Sync Dependabot Lockfile
 # CAN read Actions secrets. A GitHub App token (not GITHUB_TOKEN) is required to
 # push, because commits pushed with GITHUB_TOKEN don't re-trigger CI.
 #
+# KNOWN INTERACTION — this workflow disables `@dependabot rebase`:
+# once the app pushes its sync commit to a Dependabot branch, Dependabot sees a
+# commit by someone other than itself and refuses to rebase that PR ("Looks like
+# this PR has been edited by someone other than Dependabot"). A stale PR must
+# therefore be refreshed with `@dependabot recreate`, which rebuilds the branch
+# from scratch. That discards the sync commit, so the cycle is: recreate -> CI
+# fails at install -> this workflow syncs again -> green. It terminates, but a
+# stale PR costs a rebuild rather than a rebase. Observed on
+# PinePeakDigital/taskratchet#1236 and #1239, 2026-09-05.
+#
 # REQUIRED SETUP — the secrets live in the *Actions* secret store (workflow_run
 # reads Actions secrets):
 #

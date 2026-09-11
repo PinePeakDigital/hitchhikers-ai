@@ -20,7 +20,7 @@
     "@cloudflare/workers-types": "^5.20260903.1",
     "@types/node": "^26.4.1",
     "knip": "^6.33.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "wrangler": "^4.129.0"
   },
   "packageManager": "pnpm@10.6.1"

@@ -117,11 +117,26 @@ function isOutageNotice(stored: string): boolean {
 }
 
 /**
+ * The stored article for `urlPath` rendered as HTML, or null when none exists yet.
+ *
+ * Never touches inference, so it is safe to call on any request — including the
+ * crawler traffic that must not be allowed to trigger generation.
+ */
+export async function getCachedArticle(articles: KVNamespace, urlPath: string) {
+  // A slug poisoned by an earlier outage — the notice stored as its article, before
+  // the guard in `getArticle` existed — is treated as a miss rather than rendered.
+  // That way it regenerates once the provider recovers instead of serving the notice
+  // forever, and marked() can't disguise it from the caller's identity check.
+  const cachedEntry = await articles.get(urlPath || "404", "text");
+  return cachedEntry && !isOutageNotice(cachedEntry) ? marked(cachedEntry) : null;
+}
+
+/**
  * Retrieve (from cache) or generate a Hitchhiker's Guide–style article for a given URL path, cache it, update the indices, and return the article rendered as HTML.
  *
  * This function:
  * - Normalizes `urlPath` into a human-friendly `formattedPath`.
- * - Returns a cached HTML article if present, without contacting OpenAI.
+ * - Returns a cached HTML article if present, without touching inference.
  * - If not cached, enforces usage limits and returns a limit message when exceeded.
  * - Validates the topic is safe for work and throws Error("This topic is not safe for work.") if not.
  *   If the moderation check itself fails, returns the limit message rather than generating.
@@ -146,17 +161,13 @@ export async function getArticle(
 ) {
   const formattedPath = urlPath?.replace(/[/-]/g, " ").trim() || "404";
 
-  // Serve from KV before touching OpenAI at all. Moderating a path we already
-  // have an article for is wasted spend, and — more importantly — an OpenAI
+  // Serve from KV before touching inference at all. Moderating a path we already
+  // have an article for is wasted spend, and — more importantly — a provider
   // outage or rate limit used to take down every already-generated article.
-  const cachedEntry = await articles.get(urlPath || "404", "text");
-
-  // A slug poisoned by an earlier outage — the notice stored as its article, before
-  // the guard further down existed — is treated as a miss rather than rendered. That
-  // way it regenerates once the provider recovers instead of serving the notice
-  // forever, and marked() can't disguise it from the caller's identity check.
-  if (cachedEntry && !isOutageNotice(cachedEntry)) {
-    return marked(cachedEntry);
+  // It also makes a second click on a just-written entry free.
+  const cached = await getCachedArticle(articles, urlPath);
+  if (cached) {
+    return cached;
   }
 
   const client = new RateLimitedAI(ai, tokenUsage, gatewayId);

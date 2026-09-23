@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getArticle } from "../../../lib/getArticle";
-import { LIMIT_EXCEEDED_MESSAGE } from "../../../lib/ai";
+import { getArticle, getCachedArticle } from "../../../lib/getArticle";
 import type { APIContext } from "astro";
 
 export const prerender = false;
@@ -40,22 +39,57 @@ export function isValidArticlePath(path: string): boolean {
   return /^[a-z0-9]+(-[a-z0-9]+){0,9}$/.test(path);
 }
 
+function json(body: unknown, status: number, cacheControl?: string) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...(cacheControl && { "Cache-Control": cacheControl }),
+    },
+  });
+}
+
+function errorResponse(error: any) {
+  console.error("API Error:", error);
+  console.error("Error stack:", error?.stack);
+
+  return json(
+    {
+      error: error?.message || "Error generating article",
+      content:
+        "The Guide seems to be experiencing technical difficulties. Please try again later.",
+    },
+    500
+  );
+}
+
 /**
- * HTTP GET handler that generates article content from storage and returns it as JSON.
+ * Normalize Astro's `params.path` (a string or string[]) to the article slug, or null
+ * when it isn't a slug the Guide would ever write an entry for.
+ */
+function articlePathFrom(params: APIContext["params"]): string | null {
+  const articlePath = Array.isArray(params.path) ? params.path.join("/") : params.path;
+  // Reject random/garbage paths from bots/crawlers before they reach KV. See #18.
+  return articlePath && isValidArticlePath(articlePath) ? articlePath : null;
+}
+
+const NOT_FOUND = {
+  error: "Not found",
+  content: "The Guide has no entry for that path.",
+};
+
+/**
+ * Serve an already-written article. Never generates.
  *
- * Reads ARTICLES and INDICES from the `cloudflare:workers` `env`, validates their presence, normalizes
- * the incoming `params.path` (joins arrays with `/`, falls back to `"404"` when empty),
- * and calls `getArticle` with the OpenAI API key and token usage flags. On success returns
- * a JSON response `{ content }`. On error returns a 500 JSON response with an `error`
- * message and a user-facing `content` notice.
+ * Generation used to happen here, which let crawlers write the Guide: every entry
+ * links to 5-8 slugs that don't exist yet, and headless browsers following those
+ * links spent the whole daily inference budget within ~90 minutes of each 00:00 UTC
+ * reset, locking readers out for the other ~22 hours. A GET now only reads; writing
+ * a new entry takes an explicit POST, which the page sends when a reader clicks.
  *
- * Successful (200) responses are cached at the Cloudflare edge using the Workers Cache API
- * keyed on the request URL, so repeat views skip the ARTICLES KV read entirely. Rate-limit and
- * outage notices are returned as 200s but sent `no-store` and never cached, so a transient
- * failure can't outlive the condition that produced it (see #25: failures aren't cached).
- *
- * @param params.path - Route path captured by Astro; may be a string or string[] (arrays are joined with `/`)
- * @returns A Response with a JSON body. Success: status 200 and `{ content }`. Failure: status 500 and `{ error, content }`.
+ * Found articles are edge-cached via the Workers Cache API keyed on the URL path, so
+ * repeat views skip the ARTICLES KV read. A missing entry is a 404 `{ missing: true }`
+ * sent `no-store`, since it stops being true the moment someone writes it.
  */
 export async function GET({ params, request }: APIContext) {
   try {
@@ -81,46 +115,56 @@ export async function GET({ params, request }: APIContext) {
       }
     }
 
-    const articles = env.ARTICLES;
-    const indices = env.INDICES;
-
-    if (!articles || !indices) {
-      throw new Error("Article or index storage not available");
+    const articlePath = articlePathFrom(params);
+    if (!articlePath) {
+      return json(NOT_FOUND, 404, "public, max-age=86400");
     }
 
-    // Log the incoming path for debugging
-    console.log("Incoming path:", params.path);
-
-    // Handle path parameter correctly - it comes as an array
-    const articlePath = Array.isArray(params.path)
-      ? params.path.join("/")
-      : params.path;
-    console.log("Processed path:", articlePath);
-
-    // Reject random/garbage paths from bots/crawlers before they trigger
-    // article generation, KV writes, and index updates. See #18.
-    if (!articlePath || !isValidArticlePath(articlePath)) {
-      return new Response(
-        JSON.stringify({
-          error: "Not found",
-          content: "The Guide has no entry for that path.",
-        }),
-        {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "public, max-age=86400",
-          },
-        }
-      );
+    const content = await getCachedArticle(env.ARTICLES, articlePath);
+    if (!content) {
+      return json({ missing: true }, 404, "no-store");
     }
+
+    const response = json(
+      { content },
+      200,
+      "public, s-maxage=86400, stale-while-revalidate=86400"
+    );
+
+    if (cache) {
+      await cache.put(cacheKey, response.clone());
+    }
+
+    return response;
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/**
+ * Write the entry for this path (or return it, if someone already has).
+ *
+ * The only route that spends inference on articles. Link-following crawlers never
+ * send it; the page sends it when a reader clicks "write this entry". Returns 200
+ * `{ content }`, where `content` may be the limit/outage notice — callers detect it
+ * by identity, and it is never cached (see #25: failures aren't cached). POSTs
+ * aren't edge-cached anyway; the next GET reads the new entry from KV.
+ */
+export async function POST({ params }: APIContext) {
+  try {
+    const articlePath = articlePathFrom(params);
+    if (!articlePath) {
+      return json(NOT_FOUND, 404);
+    }
+
+    console.log("Writing entry:", articlePath);
 
     const content = await getArticle(
       env.AI,
       env.TOKEN_USAGE,
-      articles,
+      env.ARTICLES,
       articlePath,
-      indices,
+      env.INDICES,
       env.AI_GATEWAY_ID
     );
 
@@ -128,43 +172,8 @@ export async function GET({ params, request }: APIContext) {
       throw new Error("No content generated");
     }
 
-    // A limit/outage notice is a temporary condition, not an article. Caching it
-    // would outlive the condition that produced it — a moments-long OpenAI blip
-    // would be served from the edge for a full day. Keep #25's rule intact:
-    // failures aren't cached, whichever side of the 200/500 line they land on.
-    const isNotice = content === LIMIT_EXCEEDED_MESSAGE;
-
-    const response = new Response(JSON.stringify({ content }), {
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": isNotice
-          ? "no-store"
-          : "public, s-maxage=86400, stale-while-revalidate=86400",
-      },
-    });
-
-    if (cache && !isNotice) {
-      await cache.put(cacheKey, response.clone());
-    }
-
-    return response;
-  } catch (error: any) {
-    // Log the full error for debugging
-    console.error("API Error:", error);
-    console.error("Error stack:", error.stack);
-
-    return new Response(
-      JSON.stringify({
-        error: error.message || "Error generating article",
-        content:
-          "The Guide seems to be experiencing technical difficulties. Please try again later.",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    return json({ content }, 200, "no-store");
+  } catch (error) {
+    return errorResponse(error);
   }
 }

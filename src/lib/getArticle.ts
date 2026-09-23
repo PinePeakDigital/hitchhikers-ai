@@ -124,7 +124,7 @@ function isOutageNotice(stored: string): boolean {
  */
 export async function getCachedArticle(articles: KVNamespace, urlPath: string) {
   // A slug poisoned by an earlier outage — the notice stored as its article, before
-  // the guard in `getArticle` existed — is treated as a miss rather than rendered.
+  // `getArticle` refused to persist it — is treated as a miss rather than rendered.
   // That way it regenerates once the provider recovers instead of serving the notice
   // forever, and marked() can't disguise it from the caller's identity check.
   const cachedEntry = await articles.get(urlPath || "404", "text");
@@ -193,7 +193,7 @@ export async function getArticle(
   try {
     const text = await getArticleText(client, formattedPath);
 
-    // createChatCompletion swallows a 429 and hands back the limit notice in a
+    // createText swallows an inference failure and hands back the limit notice in a
     // normal completion shape, so `text` can be the notice rather than an article.
     // Storing it would poison the slug permanently — ARTICLES entries carry no TTL
     // — and appendToIndex would then surface it in the random recommendations.

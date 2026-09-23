@@ -110,6 +110,7 @@ try {
     if (!content || !loading || !error || !missing) return;
 
     missing.classList.add("hidden");
+    error.classList.add("hidden");
     loading.classList.remove("hidden");
 
     try {
@@ -154,6 +155,8 @@ try {
       console.error("Error loading article:", e);
       error.classList.remove("hidden");
       loading.classList.add("hidden");
+      // Leave the button up after a failed write so the reader can retry.
+      if (method === "POST") missing.classList.remove("hidden");
     }
   }
 

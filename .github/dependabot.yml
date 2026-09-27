@@ -18,6 +18,16 @@ updates:
       npm-security:
         applies-to: security-updates
         patterns: ["*"]
+    ignore:
+      # `astro check` cannot run under TypeScript 7. @astrojs/language-server
+      # asserts the TS module exposes the programmatic API, and TS 7's native
+      # compiler does not: "The TypeScript module loaded (found 7.0.2) does not
+      # expose the programmatic API that `astro check` relies on."
+      # Verified 2026-09-27 that the guard is still present in the latest
+      # language-server (2.17.1), so this is not a wait-for-the-patch case.
+      # The build itself passes under TS 7 — only the type check is blocked.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

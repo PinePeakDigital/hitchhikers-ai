@@ -11,13 +11,13 @@
     "knip": "knip"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^14.3.2",
-    "astro": "^7.3.3",
-    "marked": "^18.0.13"
+    "@astrojs/cloudflare": "^14.3.3",
+    "astro": "^7.3.4",
+    "marked": "^18.0.14"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
-    "@cloudflare/workers-types": "^5.20260921.1",
+    "@cloudflare/workers-types": "^5.20260923.1",
     "@types/node": "^26.6.2",
     "knip": "^6.37.0",
     "typescript": "^6.0.3",

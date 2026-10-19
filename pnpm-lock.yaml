@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  wrangler: '>=4.142.0 <5.0.0'
+  wrangler: '>=4.151.2 <5.0.0'
   defu: '>=6.1.5 <7.0.0'
   devalue: '>=5.6.2 <6.0.0'
   h3: '>=1.15.6 <2.0.0'
@@ -52,7 +52,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
       wrangler:
-        specifier: ^4.151.2
+        specifier: '>=4.151.2 <5.0.0'
         version: 4.151.2(@cloudflare/workers-types@5.20261019.1)(@types/node@26.6.2)
 
 packages:
@@ -67,7 +67,7 @@ packages:
     resolution: {integrity: sha512-4aWixXcCsxOGUH/alrJ/a/Nm5pKYBy8vqDj6YDmG+yPSLrx5QptLVCJTGyKPRRWtWG4rExPXrD2ClO7jqpYauw==}
     peerDependencies:
       astro: ^7.2.0
-      wrangler: '>=4.142.0 <5.0.0'
+      wrangler: '>=4.151.2 <5.0.0'
 
   '@astrojs/compiler-binding-android-arm64@0.4.1':
     resolution: {integrity: sha512-Wtx2DZORuNTLASLLZ8hlrjFaJe1LUloatcCn9EPq7knBhRpjMGXeJANIJMeBZG4igvz7x+3nyAJM2iwCSW9xog==}
@@ -263,7 +263,7 @@ packages:
     hasBin: true
     peerDependencies:
       vite: '>=8.0.13 <9.0.0'
-      wrangler: '>=4.142.0 <5.0.0'
+      wrangler: '>=4.151.2 <5.0.0'
 
   '@cloudflare/workerd-darwin-64@1.20260926.1':
     resolution: {integrity: sha512-VCIpwgJu5Dm1o+VHLclNOKIdpttEqss7oDHS5DYxgVoonM9Dxxxr1xCQvJbh6IXFuQ1DDrbm5krjte5NsTgX3Q==}

@@ -15,8 +15,8 @@
 /**
  * Insert (or update) an article entry in the D1 `articles` table.
  *
- * Used when a new article is generated; replaces the old `updateIndex`
- * KV-list-and-cache flow with a single indexed SQL UPSERT.
+ * Used when a new article is generated; replaces the old KV list-and-cache
+ * index rebuild with a single indexed SQL UPSERT.
  *
  * @param db - The D1 database binding.
  * @param name - The article key/path being recorded.
@@ -38,6 +38,8 @@ export async function updateIndex(
       .bind(name, uploaded)
       .run();
   } catch (error) {
-    console.error("D1 updateIndex failed:", error);
+    // The article body is already in KV, and a cached article never re-runs this write, so a
+    // failure leaves it unindexed until scripts/backfill-d1-index.sh runs. Name it for that.
+    console.error(`D1 updateIndex failed for "${name}":`, error);
   }
 }

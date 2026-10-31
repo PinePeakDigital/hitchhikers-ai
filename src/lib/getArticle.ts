@@ -196,7 +196,7 @@ export async function getArticle(
     // createText swallows an inference failure and hands back the limit notice in a
     // normal completion shape, so `text` can be the notice rather than an article.
     // Storing it would poison the slug permanently — ARTICLES entries carry no TTL
-    // — and appendToIndex would then surface it in the random recommendations.
+    // — and updateIndex would then surface it in the random recommendations.
     // getSearchResults guards its own KV write the same way.
     if (text === LIMIT_EXCEEDED_MESSAGE) {
       return LIMIT_EXCEEDED_MESSAGE;

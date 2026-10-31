@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-hitchhikers-ai is an Astro-based web application that generates Hitchhiker's Guide to the Galaxy-style articles using Cloudflare Workers AI. The application runs as a Cloudflare Worker with server-side rendering, using KV for caching and the `AI` binding for inference — there are no external AI provider accounts or API keys.
+hitchhikers-ai is an Astro-based web application that generates Hitchhiker's Guide to the Galaxy-style articles using Cloudflare Workers AI. The application runs as a Cloudflare Worker with server-side rendering, using KV for article/search storage, D1 for the article index, and the `AI` binding for inference — there are no external AI provider accounts or API keys.
 
 ## Development Commands
 
@@ -111,6 +111,9 @@ No AI provider keys are required. Optionally:
 ```bash
 pnpm wrangler secret put AI_GATEWAY_ID
 ```
+
+### D1 Article Index
+The `DB` binding (database `hitchhikers-articles`, schema in `migrations/0001_articles.sql`) holds `articles(name, uploaded)`. It backs the homepage count, latest entry, `/random` and recommendations, so none of them issue KV `list` calls. `getArticle` upserts a row after each new KV write. Provision with `wrangler d1 create hitchhikers-articles`, paste the id into `wrangler.jsonc`, run `wrangler d1 migrations apply hitchhikers-articles --remote`, then `./scripts/backfill-d1-index.sh` to index articles that already exist. The `INDICES` KV binding is no longer read and is kept only for rollback.
 
 ### KV Namespace Bindings
 Update `wrangler.jsonc` with your namespace IDs:

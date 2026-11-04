@@ -21,7 +21,7 @@
     "@types/node": "^26.6.2",
     "knip": "^6.37.0",
     "typescript": "^6.0.3",
-    "wrangler": "^4.151.2"
+    "wrangler": "^4.157.0"
   },
   "packageManager": "pnpm@10.6.1"
 }
